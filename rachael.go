@@ -232,12 +232,11 @@ func (r *RTM) runIn(environment *hu.Environment, term hu.Term) hu.Term {
 	}
 	now := time.Now()
 	r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("scheduled `%s` to run at %s", terms[1], now.Add(wait).Format("Monday, January 2, 3:04pm"))}
-	go func() {
-		time.Sleep(wait)
+	time.AfterFunc(wait, func() {
 		action := environment.Evaluate(terms[1])
 		r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("As requested running `%s` now", terms[1])}
 		environment.Evaluate(hu.Application([]hu.Term{action}))
-	}()
+	})
 	return nil
 }
 
@@ -258,10 +257,9 @@ func (r *RTM) runAt(environment *hu.Environment, term hu.Term) hu.Term {
 		wait += duration
 	}
 	r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("scheduled `%s` to run at %s", terms[1], now.Add(wait).Format("Monday, January 2, 3:04pm"))}
-	go func() {
-		time.Sleep(wait)
+	time.AfterFunc(wait, func() {
 		r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("As requested running `%s` now", terms[1])}
 		environment.Evaluate(hu.Application([]hu.Term{action}))
-	}()
+	})
 	return nil
 }

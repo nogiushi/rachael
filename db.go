@@ -2,10 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/gob"
 	"log"
 	"time"
-	"encoding/gob"
-	
+
 	"github.com/eikeon/dynamodb"
 	"github.com/eikeon/hu"
 )

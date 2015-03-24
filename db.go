@@ -1,13 +1,13 @@
 package main
 
 import (
-	"log"	
-	"time"
 	"bytes"
+	"log"
+	"time"
 	"encoding/gob"
 	
-	"github.com/eikeon/hu"
 	"github.com/eikeon/dynamodb"
+	"github.com/eikeon/hu"
 )
 
 var DB dynamodb.DynamoDB
@@ -15,20 +15,19 @@ var DB dynamodb.DynamoDB
 var tableName string = "RachaelFrame"
 
 type FrameItem struct {
-	Symbol    string `db:"HASH"`
-	GOB       []byte
+	Symbol string `db:"HASH"`
+	GOB    []byte
 }
-
 
 func init() {
 	gob.Register(hu.Boolean(true))
 	gob.Register(hu.String(""))
 	gob.Register(hu.Abstraction{})
-	gob.Register(hu.Application{})	
+	gob.Register(hu.Application{})
 	gob.Register(hu.Tuple{})
 	gob.Register(hu.Number{})
 	gob.Register(hu.Symbol(""))
-	
+
 	DB = dynamodb.NewDynamoDB()
 
 	table, err := DB.Register(tableName, (*FrameItem)(nil))
@@ -59,7 +58,7 @@ type dbframe map[hu.Symbol]hu.Term
 func (f dbframe) Define(variable hu.Symbol, value hu.Term) {
 	//log.Printf("Define: %v - value: %#v\n", variable, value)
 	// TODO: check if defined before just setting
-	var network bytes.Buffer 	
+	var network bytes.Buffer
 	enc := gob.NewEncoder(&network)
 
 	err := enc.Encode(&value)

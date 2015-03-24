@@ -4,16 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
-	"golang.org/x/net/websocket"
 	"github.com/eikeon/hu"
 	"github.com/eikeon/hue"
+	"golang.org/x/net/websocket"
 )
 
 const DEV string = "C040BHR3K"
@@ -32,23 +32,23 @@ type Message struct {
 	User      string `json:"User,omitempty"`
 	Text      string `json:"text"`
 	TimeStamp string `json:"ts,omitempty"`
-	
+
 	//Confirmation
-	Ok bool `json:"ok"`
-	ReplyTo int `json:"reply_to"`
+	Ok      bool `json:"ok"`
+	ReplyTo int  `json:"reply_to"`
 }
 
 type RTM struct {
-	token   string
-	ws      *websocket.Conn
-	in, out chan Message
-	ids chan int
+	token         string
+	ws            *websocket.Conn
+	in, out       chan Message
+	ids           chan int
 	previousStart time.Time
 }
 
 func (r *RTM) start() {
 	if time.Now().Sub(r.previousStart) < time.Second {
-		time.Sleep(10*time.Second)
+		time.Sleep(10 * time.Second)
 	}
 	r.previousStart = time.Now()
 	resp, err := http.PostForm("https://slack.com/api/rtm.start", url.Values{"token": {r.token}})
@@ -77,9 +77,9 @@ func (r *RTM) start() {
 }
 
 func (r *RTM) run() {
-	go func () {
+	go func() {
 		r.ids = make(chan int)
-		for id:=0; ; id++ {
+		for id := 0; ; id++ {
 			r.ids <- id
 		}
 		close(r.ids)
@@ -96,7 +96,7 @@ func (r *RTM) run() {
 				r.start()
 			} else {
 				log.Println("websocket receive:", err)
-				r.start()				
+				r.start()
 			}
 		}
 	}()
@@ -148,7 +148,7 @@ func main() {
 	environment.AddPrimitive("in", r.runIn)
 	environment.AddPrimitive("at", r.runAt)
 	environment.Define("blink", hu.String(`{"alert": "select"}`))
-	
+
 	go r.run()
 	for e := range r.in {
 		switch e.Type {
@@ -168,7 +168,7 @@ func main() {
 				//if strings.HasPrefix(m.Text, "{") {
 				input := m.Text
 				input = strings.Replace(input, `“`, `"`, -1)
-				input = strings.Replace(input, `”`, `"`, -1)				
+				input = strings.Replace(input, `”`, `"`, -1)
 				reader := strings.NewReader(input)
 				expression := hu.Read(reader)
 				result := environment.Evaluate(expression)
@@ -195,7 +195,7 @@ func (r *RTM) hueSetState(environment *hu.Environment, term hu.Term) hu.Term {
 	address := environment.Evaluate(terms[0])
 	value := environment.Evaluate(terms[1])
 	log.Printf("hueSetState: %#v: %v", address, value)
-	h := &hue.Hue{Username: "28dd21d2f61467f1d0cf7a01b9725f"}	
+	h := &hue.Hue{Username: "28dd21d2f61467f1d0cf7a01b9725f"}
 	for {
 		var state map[string]interface{}
 		dec := json.NewDecoder(strings.NewReader(value.String()))
@@ -230,8 +230,8 @@ func (r *RTM) runIn(environment *hu.Environment, term hu.Term) hu.Term {
 		log.Println("err: ", err)
 		return nil
 	}
-	now := time.Now()	
-	r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("scheduled `%s` to run at %s", terms[1], now.Add(wait).Format("Monday, January 2, 3:04pm"))}	
+	now := time.Now()
+	r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("scheduled `%s` to run at %s", terms[1], now.Add(wait).Format("Monday, January 2, 3:04pm"))}
 	go func() {
 		time.Sleep(wait)
 		action := environment.Evaluate(terms[1])
@@ -260,7 +260,7 @@ func (r *RTM) runAt(environment *hu.Environment, term hu.Term) hu.Term {
 	r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("scheduled `%s` to run at %s", terms[1], now.Add(wait).Format("Monday, January 2, 3:04pm"))}
 	go func() {
 		time.Sleep(wait)
-		r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("As requested running `%s` now", terms[1])}		
+		r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("As requested running `%s` now", terms[1])}
 		environment.Evaluate(hu.Application([]hu.Term{action}))
 	}()
 	return nil

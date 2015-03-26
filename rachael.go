@@ -13,6 +13,7 @@ import (
 
 	"github.com/eikeon/hu"
 	"github.com/eikeon/hue"
+	"github.com/eikeon/scheduler"
 	"golang.org/x/net/websocket"
 )
 
@@ -147,6 +148,7 @@ func main() {
 	environment.AddPrimitive("HueSetState", r.hueSetState)
 	environment.AddPrimitive("in", r.runIn)
 	environment.AddPrimitive("at", r.runAt)
+	environment.AddPrimitive("schedule", r.schedule)
 	environment.Define("blink", hu.String(`{"alert": "select"}`))
 
 	go r.run()
@@ -225,25 +227,20 @@ func (r *RTM) hueSetState(environment *hu.Environment, term hu.Term) hu.Term {
 func (r *RTM) runIn(environment *hu.Environment, term hu.Term) hu.Term {
 	terms := term.(hu.Tuple)
 	d := environment.Evaluate(terms[0]).(hu.Term).String()
+	action := terms[1]
 	wait, err := time.ParseDuration(d)
 	if err != nil {
 		log.Println("err: ", err)
 		return nil
 	}
-	now := time.Now()
-	r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("scheduled `%s` to run at %s", terms[1], now.Add(wait).Format("Monday, January 2, 3:04pm"))}
-	time.AfterFunc(wait, func() {
-		action := environment.Evaluate(terms[1])
-		r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("As requested running `%s` now", terms[1])}
-		environment.Evaluate(hu.Application([]hu.Term{action}))
-	})
-	return nil
+	t := time.Now().Add(wait)
+	return r.runAtTime(environment, action, t)
 }
 
 func (r *RTM) runAt(environment *hu.Environment, term hu.Term) hu.Term {
 	terms := term.(hu.Tuple)
 	when := environment.Evaluate(terms[0]).(hu.Term).String()
-	action := environment.Evaluate(terms[1])
+	action := terms[1]
 	now := time.Now()
 	zone, _ := now.Zone()
 	on, err := time.Parse("2006-01-02 "+time.Kitchen+" MST", now.Format("2006-01-02 ")+when+" "+zone)
@@ -256,10 +253,23 @@ func (r *RTM) runAt(environment *hu.Environment, term hu.Term) hu.Term {
 	if wait < 0 {
 		wait += duration
 	}
-	r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("scheduled `%s` to run at %s", terms[1], now.Add(wait).Format("Monday, January 2, 3:04pm"))}
+
+	t := now.Add(wait)
+	return r.runAtTime(environment, action, t)
+}
+
+func (r *RTM) runAtTime(environment *hu.Environment, application hu.Term, t time.Time) hu.Term {
+	r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("scheduled `%s` to run at %s", application, t.Format("Monday, January 2, 3:04pm"))}
+	wait := time.Duration((t.UnixNano() - time.Now().UnixNano()))
 	time.AfterFunc(wait, func() {
-		r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("As requested running `%s` now", terms[1])}
-		environment.Evaluate(hu.Application([]hu.Term{action}))
+		r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("As requested running `%s` now", application)}
+		environment.Evaluate(application)
 	})
+	return nil
+}
+
+func (r *RTM) schedule(environment *hu.Environment, term hu.Term) hu.Term {
+	var s scheduler.Schedule
+	s.Run()
 	return nil
 }

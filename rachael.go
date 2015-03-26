@@ -167,17 +167,26 @@ func main() {
 		case "message":
 			go func(m Message) {
 				log.Printf("seeing message: %#v\n", m)
-				//if strings.HasPrefix(m.Text, "{") {
-				input := m.Text
-				input = strings.Replace(input, `“`, `"`, -1)
-				input = strings.Replace(input, `”`, `"`, -1)
-				reader := strings.NewReader(input)
-				expression := hu.Read(reader)
-				result := environment.Evaluate(expression)
-				if result != nil {
-					r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("%v", result)}
+				var input string
+				if strings.HasPrefix(m.Channel, "D") {
+					input = m.Text
+				} else {
+					const prefix = "<@U03V77HBT>: "
+					log.Printf("%v\n", strings.HasPrefix(m.Text, prefix))
+					if strings.HasPrefix(m.Text, prefix) {
+						input = m.Text[len(prefix):]
+					}
 				}
-				//}
+				if input != "" {
+					input = strings.Replace(input, `“`, `"`, -1)
+					input = strings.Replace(input, `”`, `"`, -1)
+					reader := strings.NewReader(input)
+					expression := hu.Read(reader)
+					result := environment.Evaluate(expression)
+					if result != nil {
+						r.out <- Message{Id: <-r.ids, Type: "message", Channel: m.Channel, Text: fmt.Sprintf("%v", result)}
+					}
+				}
 			}(e)
 		case "team_migration_started":
 			log.Printf("team migration started")

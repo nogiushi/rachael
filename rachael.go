@@ -12,8 +12,7 @@ import (
 	"time"
 
 	"github.com/eikeon/hu"
-	"github.com/eikeon/hue"
-	"github.com/eikeon/scheduler"
+
 	"golang.org/x/net/websocket"
 )
 
@@ -39,7 +38,11 @@ type Message struct {
 	ReplyTo int  `json:"reply_to"`
 }
 
-type RTM struct {
+func (message Message) String() string {
+	return fmt.Sprintf("#<message> channel: %s Text: %s", message.Channel, message.Text)
+}
+
+type Rachael struct {
 	token         string
 	ws            *websocket.Conn
 	in, out       chan Message
@@ -47,7 +50,7 @@ type RTM struct {
 	previousStart time.Time
 }
 
-func (r *RTM) start() {
+func (r *Rachael) rtmStart() {
 	if time.Now().Sub(r.previousStart) < time.Second {
 		time.Sleep(10 * time.Second)
 	}
@@ -106,7 +109,7 @@ func (r *Rachael) run() {
 		}
 		close(r.ids)
 	}()
-	r.start()
+	r.rtmStart()
 	go func() {
 		for {
 			var m Message
@@ -115,10 +118,10 @@ func (r *Rachael) run() {
 			} else if err == io.EOF {
 				// TODO: backoff / max retry
 				log.Println("EOF... restarting")
-				r.start()
+				r.rtmStart()
 			} else {
 				log.Println("websocket receive:", err)
-				r.start()
+				r.rtmStart()
 			}
 		}
 	}()
@@ -139,21 +142,72 @@ func (r *Rachael) run() {
 	}
 }
 
-type frame map[hu.Symbol]hu.Term
-
-func (frame frame) Define(variable hu.Symbol, value hu.Term) {
-	log.Printf("Define: %v - value: %#v\n", variable, value)
-	frame[variable] = value
+func (r *Rachael) sendMessage(environment hu.Environment, term hu.Term) hu.Term {
+	terms := term.(hu.Tuple)
+	channel := environment.Evaluate(terms[0]).(hu.Term).String()
+	text := environment.Evaluate(terms[1]).(hu.Term).String()
+	log.Println(fmt.Sprintf(`{sendMessage "%s" "%s"}\n`, channel, text))
+	r.out <- Message{Id: <-r.ids, Type: "message", Channel: channel, Text: text}
+	return nil
 }
 
-func (frame frame) Set(variable hu.Symbol, value hu.Term) bool {
-	_, ok := frame[variable]
-	return ok
+type messageEnvironment struct {
+	frame  hu.Frame
+	parent hu.Environment
 }
 
-func (frame frame) Get(variable hu.Symbol) (hu.Term, bool) {
-	value, ok := frame[variable]
-	return value, ok
+func (environment *messageEnvironment) String() string {
+	return "#<Rachael's Message Environment>"
+}
+
+func (e *messageEnvironment) NewChildEnvironment() hu.Environment {
+	return hu.NewEnvironmentWithParent(e)
+}
+
+func (environment *messageEnvironment) Extend(variables, values hu.Term) {
+	environment.parent.Extend(variables, values)
+}
+
+func (environment *messageEnvironment) Define(variable hu.Symbol, value hu.Term) {
+	environment.parent.Define(variable, value)
+}
+
+func (environment *messageEnvironment) Set(variable hu.Symbol, value hu.Term) {
+	environment.parent.Set(variable, value)
+}
+
+func (environment *messageEnvironment) Get(variable hu.Symbol) hu.Term {
+	value, ok := environment.frame.Get(variable)
+	if ok {
+		return value
+	} else if environment.parent != nil {
+		return environment.parent.Get(variable)
+	} else {
+		panic("unbound variable:" + variable) //hu.UnboundVariableError{variable, "get"})
+	}
+	return nil
+}
+
+func (environment *messageEnvironment) AddPrimitive(name string, function hu.PrimitiveFunction) {
+	environment.Define(hu.Symbol(name), function)
+}
+
+func (e *messageEnvironment) Evaluate(term hu.Term) (result hu.Term) {
+	defer func() {
+		switch x := recover().(type) {
+		case hu.Term:
+			result = x
+		case interface{}:
+			result = hu.Error(fmt.Sprintf("%v", x))
+		}
+	}()
+tailcall:
+	switch t := term.(type) {
+	case hu.Reducible:
+		term = t.Reduce(e)
+		goto tailcall
+	}
+	return term
 }
 
 func main() {
@@ -161,16 +215,18 @@ func main() {
 	if t == "" {
 		log.Fatal("SLACK_TOKEN not defined")
 	}
-	r := &RTM{token: t, in: make(chan Message, 50), out: make(chan Message, 50)}
+	r := &Rachael{token: t, in: make(chan Message, 50), out: make(chan Message, 50)}
 	//environment := hu.NewEnvironment()
-	//environment := hu.NewEnvironmentWithFrame(make(frame))
-	environment := hu.NewEnvironmentWithFrame(&dbframe{})
-	hu.AddDefaultBindings(environment)
-	environment.AddPrimitive("HueSetState", r.hueSetState)
-	environment.AddPrimitive("in", r.runIn)
-	environment.AddPrimitive("at", r.runAt)
-	environment.AddPrimitive("schedule", r.schedule)
-	environment.Define("blink", hu.String(`{"alert": "select"}`))
+	env := hu.NewEnvironmentWithFrame(&dbframe{})
+	hu.AddDefaultBindings(env)
+	env.AddPrimitive("sendMessage", r.sendMessage)
+	env.AddPrimitive("tell", r.sendMessage)
+	env.AddPrimitive("imopen", r.imOpen)
+	env.AddPrimitive("HueSetState", hueSetState)
+	env.AddPrimitive("turn", hueSetState)
+	env.AddPrimitive("in", runIn)
+	env.AddPrimitive("at", runAt)
+	env.AddPrimitive("schedule", schedule) //env.Define(hu.Symbol("schedule"), hu.PrimitiveFunction(schedule))
 
 	go r.run()
 	for e := range r.in {
@@ -202,8 +258,16 @@ func main() {
 					input = strings.Replace(input, `“`, `"`, -1)
 					input = strings.Replace(input, `”`, `"`, -1)
 					reader := strings.NewReader(input)
-					expression := hu.Read(reader)
-					result := environment.Evaluate(expression)
+					expression := hu.ReadMessage(reader)
+					log.Println(fmt.Sprintf("expression: %#v", expression))
+					frame := hu.LocalFrame{}
+					frame[hu.Symbol("message")] = m
+					frame[hu.Symbol("channel")] = hu.String(m.Channel)
+					frame[hu.Symbol("user")] = hu.String(m.User)
+					frame[hu.Symbol("text")] = hu.String(m.Text)
+					me := &messageEnvironment{frame, env}
+
+					result := me.Evaluate(hu.Application(expression))
 					if result != nil {
 						r.out <- Message{Id: <-r.ids, Type: "message", Channel: m.Channel, Text: fmt.Sprintf("%v", result)}
 					}
@@ -211,7 +275,7 @@ func main() {
 			}(e)
 		case "team_migration_started":
 			log.Printf("team migration started")
-			r.start()
+			r.rtmStart()
 		case "user_typing":
 			log.Println("User typing")
 		case "presence_change":
@@ -220,86 +284,4 @@ func main() {
 			fmt.Printf("Received: %s.\n", e)
 		}
 	}
-}
-
-func (r *RTM) hueSetState(environment *hu.Environment, term hu.Term) hu.Term {
-	terms := term.(hu.Tuple)
-	address := environment.Evaluate(terms[0])
-	value := environment.Evaluate(terms[1])
-	log.Printf("hueSetState: %#v: %v", address, value)
-	h := &hue.Hue{Username: "28dd21d2f61467f1d0cf7a01b9725f"}
-	for {
-		var state map[string]interface{}
-		dec := json.NewDecoder(strings.NewReader(value.String()))
-		if err := dec.Decode(&state); err != nil {
-			log.Println("hue decode err:", err)
-		}
-
-		err := h.Set(address.String(), &state)
-		if err != nil {
-			log.Println("error:", err)
-			if err := h.CreateUser(h.Username, "Marvin"); err == nil {
-				log.Println("h:", h)
-			} else {
-				text := fmt.Sprintf("%s: press hue link button to authenticate", err)
-				log.Println(text)
-				r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: text}
-				time.Sleep(time.Second)
-			}
-		} else {
-			return nil
-		}
-	}
-	return nil
-	//return &Number{result}
-}
-
-func (r *RTM) runIn(environment *hu.Environment, term hu.Term) hu.Term {
-	terms := term.(hu.Tuple)
-	d := environment.Evaluate(terms[0]).(hu.Term).String()
-	action := terms[1]
-	wait, err := time.ParseDuration(d)
-	if err != nil {
-		log.Println("err: ", err)
-		return nil
-	}
-	t := time.Now().Add(wait)
-	return r.runAtTime(environment, action, t)
-}
-
-func (r *RTM) runAt(environment *hu.Environment, term hu.Term) hu.Term {
-	terms := term.(hu.Tuple)
-	when := environment.Evaluate(terms[0]).(hu.Term).String()
-	action := terms[1]
-	now := time.Now()
-	zone, _ := now.Zone()
-	on, err := time.Parse("2006-01-02 "+time.Kitchen+" MST", now.Format("2006-01-02 ")+when+" "+zone)
-	if err != nil {
-		log.Println("could not parse when of '" + when + "' for " + action.String())
-		return nil
-	}
-	duration := 60 * 60 * 24 * time.Second
-	wait := time.Duration((on.UnixNano() - now.UnixNano()) % int64(duration))
-	if wait < 0 {
-		wait += duration
-	}
-
-	t := now.Add(wait)
-	return r.runAtTime(environment, action, t)
-}
-
-func (r *RTM) runAtTime(environment *hu.Environment, application hu.Term, t time.Time) hu.Term {
-	r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("scheduled `%s` to run at %s", application, t.Format("Monday, January 2, 3:04pm"))}
-	wait := time.Duration((t.UnixNano() - time.Now().UnixNano()))
-	time.AfterFunc(wait, func() {
-		r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: fmt.Sprintf("As requested running `%s` now", application)}
-		environment.Evaluate(application)
-	})
-	return nil
-}
-
-func (r *RTM) schedule(environment *hu.Environment, term hu.Term) hu.Term {
-	var s scheduler.Schedule
-	s.Run()
-	return nil
 }

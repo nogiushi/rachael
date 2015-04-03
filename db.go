@@ -37,7 +37,6 @@ func init() {
 	pt := dynamodb.ProvisionedThroughput{ReadCapacityUnits: 10, WriteCapacityUnits: 10}
 	if _, err := DB.CreateTable(table.TableName, table.AttributeDefinitions, table.KeySchema, pt, nil); err != nil {
 		log.Println(err)
-		//t.Error(err)
 	}
 
 	for {

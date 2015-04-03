@@ -77,7 +77,28 @@ func (r *RTM) start() {
 	r.ws = ws
 }
 
-func (r *RTM) run() {
+func (r *Rachael) imOpen(environment hu.Environment, term hu.Term) hu.Term {
+	terms := term.(hu.Tuple)
+	user := environment.Evaluate(terms[0]).(hu.Term).String()
+	resp, err := http.PostForm("https://slack.com/api/im.open", url.Values{"token": {r.token}, "user": {user}})
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := json.NewDecoder(resp.Body)
+	var v struct {
+		Ok      bool `json:"ok"`
+		Channel struct {
+			Id string `json:"id"`
+		} `json:"channel"`
+	}
+	if err := dec.Decode(&v); err != nil {
+		log.Fatal("error decoding")
+	}
+	log.Printf("im.open response: %#v\n", v)
+	return nil
+}
+
+func (r *Rachael) run() {
 	go func() {
 		r.ids = make(chan int)
 		for id := 0; ; id++ {

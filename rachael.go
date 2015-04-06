@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -101,7 +103,7 @@ func (r *Rachael) imOpen(environment hu.Environment, term hu.Term) hu.Term {
 	return nil
 }
 
-func (r *Rachael) run() {
+func (r *Rachael) run(env hu.Environment) {
 	go func() {
 		r.ids = make(chan int)
 		for id := 0; ; id++ {
@@ -125,110 +127,23 @@ func (r *Rachael) run() {
 			}
 		}
 	}()
-	const duration = 10 * time.Second
-	timer := time.NewTimer(duration)
-	for {
-		select {
-		case m := <-r.out:
-			err := websocket.JSON.Send(r.ws, m)
-			if err != nil {
-				log.Println("Error sending message:", err)
+	go func() {
+		const duration = 10 * time.Second
+		timer := time.NewTimer(duration)
+		for {
+			select {
+			case m := <-r.out:
+				err := websocket.JSON.Send(r.ws, m)
+				if err != nil {
+					log.Println("Error sending message:", err)
+				}
+				timer.Reset(duration)
+			case <-timer.C:
+				timer = time.NewTimer(duration)
+				websocket.JSON.Send(r.ws, &Message{Type: "ping"})
 			}
-			timer.Reset(duration)
-		case <-timer.C:
-			timer = time.NewTimer(duration)
-			websocket.JSON.Send(r.ws, &Message{Type: "ping"})
-		}
-	}
-}
-
-func (r *Rachael) sendMessage(environment hu.Environment, term hu.Term) hu.Term {
-	terms := term.(hu.Tuple)
-	channel := environment.Evaluate(terms[0]).(hu.Term).String()
-	text := environment.Evaluate(terms[1]).(hu.Term).String()
-	log.Println(fmt.Sprintf(`{sendMessage "%s" "%s"}\n`, channel, text))
-	r.out <- Message{Id: <-r.ids, Type: "message", Channel: channel, Text: text}
-	return nil
-}
-
-type messageEnvironment struct {
-	frame  hu.Frame
-	parent hu.Environment
-}
-
-func (environment *messageEnvironment) String() string {
-	return "#<Rachael's Message Environment>"
-}
-
-func (e *messageEnvironment) NewChildEnvironment() hu.Environment {
-	return hu.NewEnvironmentWithParent(e)
-}
-
-func (environment *messageEnvironment) Extend(variables, values hu.Term) {
-	environment.parent.Extend(variables, values)
-}
-
-func (environment *messageEnvironment) Define(variable hu.Symbol, value hu.Term) {
-	environment.parent.Define(variable, value)
-}
-
-func (environment *messageEnvironment) Set(variable hu.Symbol, value hu.Term) {
-	environment.parent.Set(variable, value)
-}
-
-func (environment *messageEnvironment) Get(variable hu.Symbol) hu.Term {
-	value, ok := environment.frame.Get(variable)
-	if ok {
-		return value
-	} else if environment.parent != nil {
-		return environment.parent.Get(variable)
-	} else {
-		panic("unbound variable:" + variable) //hu.UnboundVariableError{variable, "get"})
-	}
-	return nil
-}
-
-func (environment *messageEnvironment) AddPrimitive(name string, function hu.PrimitiveFunction) {
-	environment.Define(hu.Symbol(name), function)
-}
-
-func (e *messageEnvironment) Evaluate(term hu.Term) (result hu.Term) {
-	defer func() {
-		switch x := recover().(type) {
-		case hu.Term:
-			result = x
-		case interface{}:
-			result = hu.Error(fmt.Sprintf("%v", x))
 		}
 	}()
-tailcall:
-	switch t := term.(type) {
-	case hu.Reducible:
-		term = t.Reduce(e)
-		goto tailcall
-	}
-	return term
-}
-
-func main() {
-	t := os.Getenv("SLACK_TOKEN")
-	if t == "" {
-		log.Fatal("SLACK_TOKEN not defined")
-	}
-	r := &Rachael{token: t, in: make(chan Message, 50), out: make(chan Message, 50)}
-	//environment := hu.NewEnvironment()
-	env := hu.NewEnvironmentWithFrame(&dbframe{})
-	hu.AddDefaultBindings(env)
-	env.AddPrimitive("sendMessage", r.sendMessage)
-	env.AddPrimitive("tell", r.sendMessage)
-	env.AddPrimitive("imopen", r.imOpen)
-	env.AddPrimitive("HueSetState", hueSetState)
-	env.AddPrimitive("turn", hueSetState)
-	env.AddPrimitive("in", runIn)
-	env.AddPrimitive("at", runAt)
-	env.AddPrimitive("schedule", schedule) //env.Define(hu.Symbol("schedule"), hu.PrimitiveFunction(schedule))
-
-	go r.run()
 	for e := range r.in {
 		switch e.Type {
 		case "":
@@ -257,20 +172,7 @@ func main() {
 				if input != "" {
 					input = strings.Replace(input, `“`, `"`, -1)
 					input = strings.Replace(input, `”`, `"`, -1)
-					reader := strings.NewReader(input)
-					expression := hu.ReadMessage(reader)
-					log.Println(fmt.Sprintf("expression: %#v", expression))
-					frame := hu.LocalFrame{}
-					frame[hu.Symbol("message")] = m
-					frame[hu.Symbol("channel")] = hu.String(m.Channel)
-					frame[hu.Symbol("user")] = hu.String(m.User)
-					frame[hu.Symbol("text")] = hu.String(m.Text)
-					me := &messageEnvironment{frame, env}
-
-					result := me.Evaluate(hu.Application(expression))
-					if result != nil {
-						r.out <- Message{Id: <-r.ids, Type: "message", Channel: m.Channel, Text: fmt.Sprintf("%v", result)}
-					}
+					env.Evaluate(hu.Application(hu.Tuple([]hu.Term{hu.Symbol("receiveMessage"), hu.String(m.Channel), hu.String(m.User), hu.String(input)})))
 				}
 			}(e)
 		case "team_migration_started":
@@ -284,4 +186,89 @@ func main() {
 			fmt.Printf("Received: %s.\n", e)
 		}
 	}
+}
+
+func (r *Rachael) sendMessage(environment hu.Environment, term hu.Term) hu.Term {
+	terms := term.(hu.Tuple)
+	channel := environment.Evaluate(terms[0]).(hu.Term).String()
+	text := environment.Evaluate(terms[1]).(hu.Term).String()
+	log.Println(fmt.Sprintf(`{sendMessage "%s" "%s"}\n`, channel, text))
+	r.out <- Message{Id: <-r.ids, Type: "message", Channel: channel, Text: text}
+	return nil
+}
+
+func (r *Rachael) receiveMessage(environment hu.Environment, term hu.Term) hu.Term {
+	terms := term.(hu.Tuple)
+	channel := environment.Evaluate(terms[0])
+	user := environment.Evaluate(terms[1])
+	text := environment.Evaluate(terms[2])
+	log.Println(fmt.Sprintf("received `%s` via %s from %s", text, channel, user))
+	reader := strings.NewReader(text.String())
+	expression := hu.ReadMessage(reader)
+
+	e := hu.NewEnvironmentWithFrameWithParent(&dbframe{hu.Symbol("channel"): channel, hu.Symbol("user"): user, hu.Symbol("text"): text}, environment)
+	hu.AddDefaultBindings(e)
+
+	result := hu.GuardedEvaluate(e, hu.Application(expression))
+	if result != nil {
+		r.out <- Message{Id: <-r.ids, Type: "message", Channel: channel.String(), Text: fmt.Sprintf("%v", result)}
+	}
+	return result
+}
+
+func main() {
+	config := flag.Bool("config", false, "drop into REPL to configure environment")
+	flag.Parse()
+
+	// TODO: persistent config env
+	env := hu.NewEnvironment()
+
+	if *config {
+		hu.AddDefaultBindings(env)
+
+		reader := bufio.NewReader(os.Stdin)
+
+		var result hu.Term
+		fmt.Printf("hu> ")
+		for {
+			expression := hu.Read(reader)
+			if expression != nil {
+				if expression == hu.Symbol("\n") {
+					if result != nil {
+						fmt.Fprintf(os.Stdout, "%v\n", result)
+					}
+					fmt.Printf("hu> ")
+					continue
+				} else {
+					result = env.Evaluate(expression)
+				}
+			} else {
+				fmt.Fprintf(os.Stdout, "Goodbye!\n")
+				break
+			}
+		}
+	}
+
+	// get name of Rachael environement from config environment (keying off of RESIN_DEVICE_UUID)
+
+	// TODO: get from Rachael environment
+	t := os.Getenv("SLACK_TOKEN")
+	if t == "" {
+		log.Fatal("SLACK_TOKEN not defined")
+	}
+
+	r := &Rachael{token: t, in: make(chan Message, 50), out: make(chan Message, 50)}
+
+	env.AddPrimitive("sendMessage", r.sendMessage)
+	env.AddPrimitive("receiveMessage", r.receiveMessage)
+	env.AddPrimitive("tell", r.sendMessage)
+	env.AddPrimitive("imopen", r.imOpen)
+
+	env.AddPrimitive("HueSetState", hueSetState)
+	env.AddPrimitive("turn", hueSetState)
+	env.AddPrimitive("in", runIn)
+	env.AddPrimitive("at", runAt)
+	env.AddPrimitive("schedule", schedule)
+
+	r.run(env)
 }

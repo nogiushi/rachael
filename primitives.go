@@ -44,11 +44,10 @@ func runAt(environment hu.Environment, term hu.Term) hu.Term {
 
 func runAtTime(environment hu.Environment, application hu.Term, t time.Time) hu.Term {
 	log.Println(environment.Evaluate(hu.Symbol("sendMessage")))
-	message := environment.Get(hu.Symbol("message"))
-	log.Println("MESSAGE: ", message)
-	channel := hu.String(DEV)
-	if message != nil {
-		channel = hu.String(message.(*Message).Channel)
+	channel := environment.Get(hu.Symbol("channel"))
+	log.Println("CHANNEL: ", channel)
+	if channel == nil {
+		channel = hu.String(DEV)
 	}
 	environment.Evaluate(hu.Application(hu.Tuple([]hu.Term{hu.Symbol("sendMessage"), channel, hu.String(fmt.Sprintf("scheduled `%s` to run at %s", application, t.Format("Monday, January 2, 3:04pm")))})))
 	wait := time.Duration((t.UnixNano() - time.Now().UnixNano()))

@@ -10,7 +10,7 @@ import (
 
 func runIn(environment hu.Environment, term hu.Term) hu.Term {
 	terms := term.(hu.Tuple)
-	d := environment.Evaluate(terms[0]).(hu.Term).String()
+	d := hu.Evaluate(environment, terms[0]).(hu.Term).String()
 	action := terms[1]
 	wait, err := time.ParseDuration(d)
 	if err != nil {
@@ -23,7 +23,7 @@ func runIn(environment hu.Environment, term hu.Term) hu.Term {
 
 func runAt(environment hu.Environment, term hu.Term) hu.Term {
 	terms := term.(hu.Tuple)
-	when := environment.Evaluate(terms[0]).(hu.Term).String()
+	when := hu.Evaluate(environment, terms[0]).(hu.Term).String()
 	action := terms[1]
 	now := time.Now()
 	zone, _ := now.Zone()
@@ -43,18 +43,18 @@ func runAt(environment hu.Environment, term hu.Term) hu.Term {
 }
 
 func runAtTime(environment hu.Environment, application hu.Term, t time.Time) hu.Term {
-	log.Println(environment.Evaluate(hu.Symbol("sendMessage")))
-	channel := environment.Get(hu.Symbol("channel"))
+	log.Println(hu.Evaluate(environment, hu.Symbol("sendMessage")))
+	channel, _ := environment.Get(hu.Symbol("channel"))
 	log.Println("CHANNEL: ", channel)
 	if channel == nil {
 		channel = hu.String(DEV)
 	}
-	environment.Evaluate(hu.Application(hu.Tuple([]hu.Term{hu.Symbol("sendMessage"), channel, hu.String(fmt.Sprintf("scheduled `%s` to run at %s", application, t.Format("Monday, January 2, 3:04pm")))})))
+	hu.Evaluate(environment, hu.Application(hu.Tuple([]hu.Term{hu.Symbol("sendMessage"), channel, hu.String(fmt.Sprintf("scheduled `%s` to run at %s", application, t.Format("Monday, January 2, 3:04pm")))})))
 	wait := time.Duration((t.UnixNano() - time.Now().UnixNano()))
 	time.AfterFunc(wait, func() {
-		environment.Evaluate(hu.Application(hu.Tuple([]hu.Term{hu.Symbol("sendMessage"), channel, hu.String(fmt.Sprintf("As requested running `%s` now", application))})))
+		hu.Evaluate(environment, hu.Application(hu.Tuple([]hu.Term{hu.Symbol("sendMessage"), channel, hu.String(fmt.Sprintf("As requested running `%s` now", application))})))
 		time.Sleep(time.Second)
-		environment.Evaluate(application)
+		hu.Evaluate(environment, application)
 	})
 	return nil
 }

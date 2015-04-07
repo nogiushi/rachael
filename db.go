@@ -52,7 +52,9 @@ func init() {
 	}
 }
 
-type dbframe map[hu.Symbol]hu.Term
+type dbframe struct {
+	//map[hu.Symbol]hu.Term
+}
 
 func (f dbframe) Define(variable hu.Symbol, value hu.Term) {
 	//log.Printf("Define: %v - value: %#v\n", variable, value)
@@ -62,8 +64,8 @@ func (f dbframe) Define(variable hu.Symbol, value hu.Term) {
 
 	err := enc.Encode(&value)
 	if err != nil {
-		//log.Println("encode:", err)
-		f[variable] = value
+		log.Println("encode:", err)
+		//f[variable] = value
 		return
 	}
 	fi := &FrameItem{Symbol: variable.String(), GOB: network.Bytes()}
@@ -105,6 +107,7 @@ func (f dbframe) Get(variable hu.Symbol) (hu.Term, bool) {
 			//log.Println("Didn't find item")
 		}
 	}
-	value, ok := f[variable]
-	return value, ok
+	//value, ok := f[variable]
+	//return value, ok
+	return nil, false
 }

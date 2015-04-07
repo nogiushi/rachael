@@ -84,7 +84,7 @@ func (r *Rachael) rtmStart() {
 
 func (r *Rachael) imOpen(environment hu.Environment, term hu.Term) hu.Term {
 	terms := term.(hu.Tuple)
-	user := environment.Evaluate(terms[0]).(hu.Term).String()
+	user := hu.Evaluate(environment, terms[0]).(hu.Term).String()
 	resp, err := http.PostForm("https://slack.com/api/im.open", url.Values{"token": {r.token}, "user": {user}})
 	if err != nil {
 		log.Fatal(err)
@@ -172,7 +172,7 @@ func (r *Rachael) run(env hu.Environment) {
 				if input != "" {
 					input = strings.Replace(input, `“`, `"`, -1)
 					input = strings.Replace(input, `”`, `"`, -1)
-					env.Evaluate(hu.Application(hu.Tuple([]hu.Term{hu.Symbol("receiveMessage"), hu.String(m.Channel), hu.String(m.User), hu.String(input)})))
+					hu.Evaluate(env, hu.Application(hu.Tuple([]hu.Term{hu.Symbol("receiveMessage"), hu.String(m.Channel), hu.String(m.User), hu.String(input)})))
 				}
 			}(e)
 		case "team_migration_started":
@@ -190,8 +190,8 @@ func (r *Rachael) run(env hu.Environment) {
 
 func (r *Rachael) sendMessage(environment hu.Environment, term hu.Term) hu.Term {
 	terms := term.(hu.Tuple)
-	channel := environment.Evaluate(terms[0]).(hu.Term).String()
-	text := environment.Evaluate(terms[1]).(hu.Term).String()
+	channel := hu.Evaluate(environment, terms[0]).(hu.Term).String()
+	text := hu.Evaluate(environment, terms[1]).(hu.Term).String()
 	log.Println(fmt.Sprintf(`{sendMessage "%s" "%s"}\n`, channel, text))
 	r.out <- Message{Id: <-r.ids, Type: "message", Channel: channel, Text: text}
 	return nil
@@ -199,16 +199,17 @@ func (r *Rachael) sendMessage(environment hu.Environment, term hu.Term) hu.Term 
 
 func (r *Rachael) receiveMessage(environment hu.Environment, term hu.Term) hu.Term {
 	terms := term.(hu.Tuple)
-	channel := environment.Evaluate(terms[0])
-	user := environment.Evaluate(terms[1])
-	text := environment.Evaluate(terms[2])
+	channel := hu.Evaluate(environment, terms[0])
+	user := hu.Evaluate(environment, terms[1])
+	text := hu.Evaluate(environment, terms[2])
 	log.Println(fmt.Sprintf("received `%s` via %s from %s", text, channel, user))
 	reader := strings.NewReader(text.String())
 	expression := hu.ReadMessage(reader)
 
-	e := hu.NewEnvironmentWithFrameWithParent(&dbframe{hu.Symbol("channel"): channel, hu.Symbol("user"): user, hu.Symbol("text"): text}, environment)
-	hu.AddDefaultBindings(e)
-
+	ee := &hu.NestedEnvironment{Environment: hu.LocalEnvironment{hu.Symbol("channel"): channel, hu.Symbol("user"): user, hu.Symbol("text"): text}, Parent: environment}
+	hu.AddDefaultBindings(ee)
+	e := &hu.NestedEnvironment{Environment: &dbframe{}, Parent: ee}
+	log.Println(fmt.Sprintf("e: %p", e))
 	result := hu.GuardedEvaluate(e, hu.Application(expression))
 	if result != nil {
 		r.out <- Message{Id: <-r.ids, Type: "message", Channel: channel.String(), Text: fmt.Sprintf("%v", result)}
@@ -221,7 +222,7 @@ func main() {
 	flag.Parse()
 
 	// TODO: persistent config env
-	env := hu.NewEnvironment()
+	env := hu.LocalEnvironment{}
 
 	if *config {
 		hu.AddDefaultBindings(env)
@@ -240,7 +241,7 @@ func main() {
 					fmt.Printf("hu> ")
 					continue
 				} else {
-					result = env.Evaluate(expression)
+					result = hu.Evaluate(env, expression)
 				}
 			} else {
 				fmt.Fprintf(os.Stdout, "Goodbye!\n")
@@ -259,16 +260,16 @@ func main() {
 
 	r := &Rachael{token: t, in: make(chan Message, 50), out: make(chan Message, 50)}
 
-	env.AddPrimitive("sendMessage", r.sendMessage)
-	env.AddPrimitive("receiveMessage", r.receiveMessage)
-	env.AddPrimitive("tell", r.sendMessage)
-	env.AddPrimitive("imopen", r.imOpen)
+	hu.AddPrimitive(env, "sendMessage", r.sendMessage)
+	hu.AddPrimitive(env, "receiveMessage", r.receiveMessage)
+	hu.AddPrimitive(env, "tell", r.sendMessage)
+	hu.AddPrimitive(env, "imopen", r.imOpen)
 
-	env.AddPrimitive("HueSetState", hueSetState)
-	env.AddPrimitive("turn", hueSetState)
-	env.AddPrimitive("in", runIn)
-	env.AddPrimitive("at", runAt)
-	env.AddPrimitive("schedule", schedule)
+	hu.AddPrimitive(env, "HueSetState", hueSetState)
+	hu.AddPrimitive(env, "turn", hueSetState)
+	hu.AddPrimitive(env, "in", runIn)
+	hu.AddPrimitive(env, "at", runAt)
+	hu.AddPrimitive(env, "schedule", schedule)
 
 	r.run(env)
 }

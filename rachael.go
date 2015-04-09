@@ -269,7 +269,15 @@ func main() {
 	hu.AddPrimitive(env, "turn", hueSetState)
 	hu.AddPrimitive(env, "in", runIn)
 	hu.AddPrimitive(env, "at", runAt)
-	hu.AddPrimitive(env, "schedule", schedule)
+	hu.AddPrimitive(env, "forecast", getForecast)
+	env.Define(hu.Symbol("weekday"), hu.Primitive(weekday))
+	env.Define(hu.Symbol("weekend"), hu.Primitive(weekend))
+
+	s := Scheduler{}
+	s.Run(env)
+
+	hu.AddPrimitive(env, "updateScheduler", s.update)
+	go hu.Evaluate(env, hu.Application(hu.Tuple([]hu.Term{hu.Symbol("receiveMessage"), hu.String(DEV), hu.String("Rachael"), hu.String("updateScheduler schedule")})))
 
 	r.run(env)
 }

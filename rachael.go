@@ -158,13 +158,11 @@ func (r *Rachael) run(env hu.Environment) {
 			r.out <- Message{Id: <-r.ids, Type: "message", Channel: DEV, Text: "Error: " + e.Error.Message}
 		case "message":
 			go func(m Message) {
-				log.Printf("seeing message: %#v\n", m)
 				var input string
 				if strings.HasPrefix(m.Channel, "D") {
 					input = m.Text
 				} else {
 					const prefix = "<@U03V77HBT>: "
-					log.Printf("%v\n", strings.HasPrefix(m.Text, prefix))
 					if strings.HasPrefix(m.Text, prefix) {
 						input = m.Text[len(prefix):]
 					}
@@ -192,7 +190,6 @@ func (r *Rachael) sendMessage(environment hu.Environment, term hu.Term) hu.Term 
 	terms := term.(hu.Tuple)
 	channel := hu.Evaluate(environment, terms[0]).(hu.Term).String()
 	text := hu.Evaluate(environment, terms[1]).(hu.Term).String()
-	log.Println(fmt.Sprintf(`{sendMessage "%s" "%s"}\n`, channel, text))
 	r.out <- Message{Id: <-r.ids, Type: "message", Channel: channel, Text: text}
 	return nil
 }
@@ -202,14 +199,13 @@ func (r *Rachael) receiveMessage(environment hu.Environment, term hu.Term) hu.Te
 	channel := hu.Evaluate(environment, terms[0])
 	user := hu.Evaluate(environment, terms[1])
 	text := hu.Evaluate(environment, terms[2])
-	log.Println(fmt.Sprintf("received `%s` via %s from %s", text, channel, user))
 	reader := strings.NewReader(text.String())
 	expression := hu.ReadMessage(reader)
 
 	ee := &hu.NestedEnvironment{Environment: hu.LocalEnvironment{hu.Symbol("channel"): channel, hu.Symbol("user"): user, hu.Symbol("text"): text}, Parent: environment}
 	hu.AddDefaultBindings(ee)
 	e := &hu.NestedEnvironment{Environment: &dbframe{}, Parent: ee}
-	log.Println(fmt.Sprintf("e: %p", e))
+
 	result := hu.GuardedEvaluate(e, hu.Application(expression))
 	if result != nil {
 		r.out <- Message{Id: <-r.ids, Type: "message", Channel: channel.String(), Text: fmt.Sprintf("%v", result)}
@@ -265,19 +261,32 @@ func main() {
 	hu.AddPrimitive(env, "tell", r.sendMessage)
 	hu.AddPrimitive(env, "imopen", r.imOpen)
 
-	hu.AddPrimitive(env, "HueSetState", hueSetState)
-	hu.AddPrimitive(env, "turn", hueSetState)
-	hu.AddPrimitive(env, "in", runIn)
-	hu.AddPrimitive(env, "at", runAt)
+	//hu.AddPrimitive(env, "in", runIn)
+
 	hu.AddPrimitive(env, "forecast", getForecast)
 	env.Define(hu.Symbol("weekday"), hu.Primitive(weekday))
 	env.Define(hu.Symbol("weekend"), hu.Primitive(weekend))
 
-	s := Scheduler{}
-	s.Run(env)
+	pe := &hu.NestedEnvironment{Environment: &dbframe{}, Parent: env}
+	st, ok := pe.Get(hu.Symbol("scheduler"))
+	if !ok {
+		st = &Scheduler{}
+		pe.Define(hu.Symbol("scheduler"), st)
+	}
+	s := st.(*Scheduler)
+	s.Run(pe)
 
-	hu.AddPrimitive(env, "updateScheduler", s.update)
-	go hu.Evaluate(env, hu.Application(hu.Tuple([]hu.Term{hu.Symbol("receiveMessage"), hu.String(DEV), hu.String("Rachael"), hu.String("updateScheduler schedule")})))
+	hu.AddPrimitive(env, "at", s.runAt)
+	hu.AddPrimitive(env, "in", s.runIn)
+	hu.AddPrimitive(env, "stop", s.stop)
+	hu.AddPrimitive(env, "start", s.start)
+	hu.AddPrimitive(env, "remove", s.remove)
+	hu.AddPrimitive(env, "schedule", s.schedule)
+	hu.AddPrimitive(env, "s", s.schedule)
+
+	hue := NewHue(pe)
+	hu.AddPrimitive(env, "HueSetState", hue.SetState)
+	hu.AddPrimitive(env, "turn", hue.SetState)
 
 	r.run(env)
 }

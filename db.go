@@ -27,6 +27,7 @@ func init() {
 	gob.Register(hu.Tuple{})
 	gob.Register(hu.Number{})
 	gob.Register(hu.Property{})
+	gob.Register(&Scheduler{})
 	gob.Register(hu.Symbol(""))
 
 	DB = dynamodb.NewDynamoDB()

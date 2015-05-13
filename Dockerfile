@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update && apt-get install -qqy \
     avahi-daemon \
     dropbear \
-    gcc libc6-dev make \
+    gcc libc6-dev-i386 make \
     --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -18,6 +18,8 @@ ENV GOLANG_VERSION 1.4.2
 RUN curl -sSL https://golang.org/dl/go$GOLANG_VERSION.src.tar.gz \
 		| tar -v -C /usr/src -xz
 
+ENV GOOS linux
+ENV GOARCH 386
 RUN cd /usr/src/go/src && ./make.bash --no-clean 2>&1
 
 ENV PATH /usr/src/go/bin:$PATH

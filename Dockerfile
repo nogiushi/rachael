@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update && apt-get install -qqy \
     avahi-daemon \
     dropbear \
-    gcc libc6-dev-i386 make \
+    gcc libc6-dev gcc-multilib make \
     --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

@@ -30,6 +30,7 @@ ENV PATH /go/bin:$PATH
 WORKDIR /go
 
 COPY . /go/src/github.com/nogiushi/rachael
+RUN go get github.com/nogiushi/rachael
 RUN go install github.com/nogiushi/rachael
 
 ADD start.sh /start.sh

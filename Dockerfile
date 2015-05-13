@@ -18,6 +18,8 @@ ENV GOLANG_VERSION 1.4.2
 RUN curl -sSL https://golang.org/dl/go$GOLANG_VERSION.src.tar.gz \
 		| tar -v -C /usr/src -xz
 
+ENV GOOS linux
+ENV GOARCH 386
 RUN cd /usr/src/go/src && ./make.bash --no-clean 2>&1
 
 ENV PATH /usr/src/go/bin:$PATH

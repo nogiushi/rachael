@@ -7,7 +7,7 @@ sed -i -e "s@#enable-dbus=yes@enable-dbus=no@" -e "s@#host-name=foo@host-name=ra
 # Restart service
 /etc/init.d/avahi-daemon restart
 
-rachael &
+/go/bin/rachael &
 
 #Set the root password as root if not set as an ENV variable
 export PASSWD=${PASSWD:=root}
